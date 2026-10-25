@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -106,6 +107,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &rep) {
 		return
 	}
+	rep.IP, _, _ = net.SplitHostPort(r.RemoteAddr)
 	resp, err := s.Store.SaveReport(rigID, rep)
 	if err != nil {
 		writeErr(w, err)

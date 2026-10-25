@@ -141,3 +141,19 @@ func TestSystemCPU(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestTailLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "xmrig.log")
+	var b strings.Builder
+	for i := range 100 {
+		b.WriteString("\x1b[1;32mline\x1b[0m " + strings.Repeat("x", i%3) + "\r\n")
+	}
+	os.WriteFile(path, []byte(b.String()), 0o644)
+	got := tailLines(path, 3)
+	if len(got) != 3 || got[0] != "line x" || got[2] != "line " || strings.ContainsAny(got[0], "\x1b\r") {
+		t.Fatalf("got %q", got)
+	}
+	if tailLines(filepath.Join(t.TempDir(), "missing"), 3) != nil {
+		t.Fatal("missing file should give nil")
+	}
+}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,12 +34,16 @@ type Miner interface {
 	Stop()
 	Running() bool
 	Stats(ctx context.Context) MinerStats
+	// LogTail returns the last n lines the miner printed.
+	LogTail(n int) []string
 }
 
 // process runs one miner binary and stops it cleanly.
 type process struct {
 	Binary string
 	LogDir string
+	// SelfLogging miners write LogPath themselves; their console output is dropped.
+	SelfLogging bool
 
 	mu   sync.Mutex
 	cmd  *exec.Cmd
@@ -51,9 +57,10 @@ func (p *process) start(args []string) error {
 	cmd := exec.Command(p.Binary, args...)
 	cmd.Dir = filepath.Dir(p.Binary)
 	setProcessGroup(cmd)
-	if p.LogDir != "" {
-		name := strings.TrimSuffix(filepath.Base(p.Binary), filepath.Ext(p.Binary))
-		if f, err := os.OpenFile(filepath.Join(p.LogDir, name+".log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
+	if path := p.LogPath(); path != "" {
+		if p.SelfLogging {
+			_ = os.Remove(path) // the miner appends; start each run fresh
+		} else if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
 			cmd.Stdout, cmd.Stderr = f, f
 		}
 	}
@@ -69,6 +76,48 @@ func (p *process) start(args []string) error {
 	p.cmd, p.done = cmd, done
 	return nil
 }
+
+// LogPath is where the miner's output goes, or "" when not logging.
+func (p *process) LogPath() string {
+	if p.LogDir == "" {
+		return ""
+	}
+	name := strings.TrimSuffix(filepath.Base(p.Binary), filepath.Ext(p.Binary))
+	return filepath.Join(p.LogDir, name+".log")
+}
+
+func (p *process) LogTail(n int) []string { return tailLines(p.LogPath(), n) }
+
+// tailLines reads the last n lines of a file, looking at its last 16 KiB only.
+func tailLines(path string, n int) []string {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	const window = 16 << 10
+	if st, err := f.Stat(); err == nil && st.Size() > window {
+		f.Seek(st.Size()-window, io.SeekStart)
+	}
+	data, _ := io.ReadAll(f)
+	lines := strings.Split(strings.TrimRight(ansi.ReplaceAllString(string(data), ""), "\r\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], "\r")
+	}
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+	return lines
+}
+
+// ansi matches terminal color codes, which some miners print even into files.
+var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func (p *process) Stop() {
 	p.mu.Lock()
@@ -174,7 +223,7 @@ const xmrigAPIPort = 4067
 type XMRig struct{ process }
 
 func NewXMRig(binary, logDir string) *XMRig {
-	return &XMRig{process{Binary: binary, LogDir: logDir}}
+	return &XMRig{process{Binary: binary, LogDir: logDir, SelfLogging: true}}
 }
 
 func xmrigArgs(fs protocol.FlightSheet) []string {
@@ -193,7 +242,14 @@ func xmrigArgs(fs protocol.FlightSheet) []string {
 	return append(args, strings.Fields(fs.ExtraArgs)...)
 }
 
-func (m *XMRig) Start(fs protocol.FlightSheet) error { return m.start(xmrigArgs(fs)) }
+func (m *XMRig) Start(fs protocol.FlightSheet) error {
+	args := xmrigArgs(fs)
+	// XMRig prints nothing when its output is not a terminal, so let it write its own log.
+	if path := m.LogPath(); path != "" {
+		args = append(args, "--log-file", path)
+	}
+	return m.start(args)
+}
 
 func (m *XMRig) Stats(ctx context.Context) MinerStats {
 	var body xmrigSummary
@@ -262,6 +318,18 @@ func (f *FakeMiner) Running() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.running
+}
+
+func (f *FakeMiner) LogTail(n int) []string {
+	if !f.Running() {
+		return nil
+	}
+	now := time.Now().Format("2006-01-02 15:04:05")
+	return []string{
+		"[" + now + "] net      use pool pool.example.com:3333",
+		"[" + now + "] cpu      accepted (42/0) diff 120001 (31 ms)",
+		"[" + now + "] miner    speed 10s/60s/15m 6123.4 6100.2 n/a H/s max 6200.0 H/s",
+	}
 }
 
 func (f *FakeMiner) Stats(context.Context) MinerStats {

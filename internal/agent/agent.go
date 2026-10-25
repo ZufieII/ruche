@@ -10,13 +10,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"ruche/internal/protocol"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 type Config struct {
 	Server   string        // e.g. https://ruche.example.com
@@ -121,9 +122,10 @@ func (a *Agent) stopMiner() {
 func (a *Agent) report(ctx context.Context) protocol.Report {
 	host, _ := os.Hostname()
 	rep := protocol.Report{
-		Hostname:     host,
-		AgentVersion: Version,
-		UptimeS:      int64(time.Since(a.started).Seconds()),
+		Hostname:      host,
+		AgentVersion:  Version,
+		UptimeS:       int64(time.Since(a.started).Seconds()),
+		SystemUptimeS: systemUptime(),
 	}
 	if a.GPUs != nil {
 		rep.GPUs = a.GPUs.Read()
@@ -138,6 +140,7 @@ func (a *Agent) report(ctx context.Context) protocol.Report {
 	}
 	rep.Miner, rep.Algo, rep.FlightSheetID = a.current.Miner, a.current.Algo, a.current.ID
 	rep.MinerRunning = m.Running()
+	rep.MinerLog = m.LogTail(30)
 	st := m.Stats(ctx)
 	rep.TotalHashrateHs = st.TotalHs
 	for i := range rep.GPUs {
@@ -218,4 +221,15 @@ func (a *Agent) apply(resp protocol.ReportResponse) {
 			log.Printf("démarrage du mineur impossible: %v", err)
 		}
 	}
+}
+
+// systemUptime reads /proc/uptime on Linux; elsewhere it returns 0.
+func systemUptime() int64 {
+	b, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	secs, _, _ := strings.Cut(string(b), ".")
+	n, _ := strconv.ParseInt(strings.TrimSpace(secs), 10, 64)
+	return n
 }

@@ -3,9 +3,10 @@
 Alternative libre et auto-hébergeable à Hive OS pour piloter des rigs de minage.
 (« Ruche » est un nom de travail : « Hive OS » est une marque de Hiveon.)
 
-## Ce que fait la version 0.2
+## Ce que fait la version 0.3
 
 - **Tableau de bord web** : rigs en ligne ou hors ligne, hashrate total et par GPU, températures, ventilateurs, consommation, courbe du hashrate sur 6 h.
+- **Fiche détaillée d'un rig** (clic sur son nom) : wallet, pool, worker, graphique 24 h, matériel, IP, durée de fonctionnement, journal du mineur.
 - **Minage CPU avec XMRig** : hashrate, modèle du processeur, threads de minage, huge pages, température (Linux).
 - **Minage GPU avec lolMiner** : NVIDIA et AMD.
 - **Flight sheets** : mineur, algorithme, pool, wallet, worker. On l'assigne à un rig et le mineur démarre tout seul.
