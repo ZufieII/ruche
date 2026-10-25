@@ -215,8 +215,13 @@ func (s *Server) handleSaveFlightSheet(w http.ResponseWriter, r *http.Request) {
 		}
 		f.ID = id
 	}
-	if f.Miner == "" {
-		f.Miner = "lolminer"
+	switch f.Miner {
+	case "":
+		f.Miner = protocol.MinerXMRig
+	case protocol.MinerXMRig, protocol.MinerLolMiner:
+	default:
+		http.Error(w, "unknown miner", http.StatusBadRequest)
+		return
 	}
 	if f.Name == "" || f.Algo == "" || f.Pool == "" || f.Wallet == "" {
 		http.Error(w, "name, algo, pool and wallet are required", http.StatusBadRequest)

@@ -3,24 +3,26 @@
 Alternative libre et auto-hébergeable à Hive OS pour piloter des rigs de minage.
 (« Ruche » est un nom de travail : « Hive OS » est une marque de Hiveon.)
 
-## Ce que fait la version 0.1
+## Ce que fait la version 0.2
 
 - **Tableau de bord web** : rigs en ligne ou hors ligne, hashrate total et par GPU, températures, ventilateurs, consommation, courbe du hashrate sur 6 h.
-- **Flight sheets** : algorithme, pool, wallet, worker. On l'assigne à un rig et le mineur démarre tout seul.
+- **Minage CPU avec XMRig** : hashrate, modèle du processeur, threads de minage, huge pages, température (Linux).
+- **Minage GPU avec lolMiner** : NVIDIA et AMD.
+- **Flight sheets** : mineur, algorithme, pool, wallet, worker. On l'assigne à un rig et le mineur démarre tout seul.
 - **Commandes à distance** : relancer ou arrêter le mineur, redémarrer le rig.
 - **Alertes** (Telegram ou logs) : rig hors ligne, retour en ligne, GPU trop chaud.
-- **Agent du rig** : lit les GPU NVIDIA (`nvidia-smi`) et AMD (sysfs), lance lolMiner, relance le mineur s'il plante.
+- **Agent du rig** (Linux et Windows) : lit le processeur et les GPU, lance le bon mineur, le relance s'il plante.
 - L'agent se connecte **vers** le serveur : aucun port à ouvrir sur le rig.
 - Le serveur ne garde qu'une empreinte des tokens des rigs.
 
 ## Architecture
 
 ```
-rig (Linux + pilotes GPU)                serveur (Docker)
+rig (Linux ou Windows)                   serveur (Docker)
 ┌──────────────────────┐   HTTPS   ┌──────────────────────────┐
 │ ruche-agent          │ ────────► │ ruche-server             │
-│  ├ stats GPU         │  rapport  │  ├ API + tableau de bord │
-│  └ lolMiner          │ ◄──────── │  ├ SQLite                │
+│  ├ stats CPU / GPU   │  rapport  │  ├ API + tableau de bord │
+│  └ XMRig / lolMiner  │ ◄──────── │  ├ SQLite                │
 └──────────────────────┘  ordres   │  └ alertes Telegram      │
                                    └──────────────────────────┘
 ```
@@ -47,13 +49,21 @@ En dehors de ton réseau local, mets-le derrière un reverse proxy HTTPS (Caddy 
    ```
 3. Crée une flight sheet et assigne-la au rig.
 
+## Tester sous Windows
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o deploy/windows/ ./cmd/...
+```
+
+Puis suis `deploy/windows/LISEZMOI.txt` : serveur, rig et XMRig se lancent par double-clic.
+
 ## Essayer sans matériel
 
 ```bash
 go build -o bin/ ./cmd/...
 RUCHE_ADMIN_PASSWORD=demo12345 ./bin/ruche-server &
 # crée un rig dans le tableau de bord, colle son rig.conf dans demo.conf, puis :
-./bin/ruche-agent -config demo.conf -fake-gpus 4
+./bin/ruche-agent -config demo.conf -fake-cpu      # ou -fake-gpus 4
 ```
 
 ## Tests
@@ -66,6 +76,7 @@ go test ./...
 
 - Image Linux prête à flasher (pour l'instant on installe l'agent sur un Debian/Ubuntu existant)
 - Overclocking et undervolt
-- Autres mineurs que lolMiner, ASIC
+- Autres mineurs, ASIC
+- Température du processeur sous Windows
 - Plusieurs utilisateurs, 2FA
 - Calcul de rentabilité avec le prix de l'électricité

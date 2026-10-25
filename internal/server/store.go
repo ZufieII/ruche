@@ -162,8 +162,11 @@ func (s *Store) SaveReport(rigID string, rep protocol.Report) (protocol.ReportRe
 		maxTemp = max(maxTemp, g.TempC)
 		power += g.PowerW
 	}
+	if rep.CPU != nil {
+		maxTemp = max(maxTemp, rep.CPU.TempC)
+	}
 	if _, err := tx.Exec(`INSERT INTO stats (rig_id, ts, hashrate, max_temp, power) VALUES (?, ?, ?, ?, ?)`,
-		rigID, now, rep.TotalHashrateMHs, maxTemp, power); err != nil {
+		rigID, now, rep.TotalHashrateHs, maxTemp, power); err != nil {
 		return resp, err
 	}
 

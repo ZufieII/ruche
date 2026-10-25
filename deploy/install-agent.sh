@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Installe l'agent Ruche sur un rig Debian ou Ubuntu qui a déjà ses pilotes GPU.
+# Installe l'agent Ruche, XMRig (CPU) et lolMiner (GPU) sur un rig Debian ou Ubuntu.
 # Usage : sudo ./install-agent.sh ruche-agent rig.conf
 set -euo pipefail
 
 # Vérifie la dernière version sur https://github.com/Lolliedieb/lolMiner-releases/releases
 LOLMINER_VERSION="${LOLMINER_VERSION:-1.88}"
+XMRIG_VERSION="${XMRIG_VERSION:-6.22.2}"
 
 AGENT_BIN="${1:?chemin du binaire ruche-agent}"
 RIG_CONF="${2:?chemin du fichier rig.conf affiché par le tableau de bord}"
@@ -22,6 +23,17 @@ if [[ ! -x /opt/ruche/miners/lolminer/lolMiner ]]; then
   tar -xzf "$tmp/lolminer.tar.gz" -C "$tmp"
   install -d /opt/ruche/miners/lolminer
   install -m 0755 "$(find "$tmp" -type f -name lolMiner | head -n1)" /opt/ruche/miners/lolminer/lolMiner
+  rm -rf "$tmp"
+fi
+
+if [[ ! -x /opt/ruche/miners/xmrig/xmrig ]]; then
+  echo "Téléchargement de XMRig ${XMRIG_VERSION}…"
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/xmrig.tar.gz" \
+    "https://github.com/xmrig/xmrig/releases/download/v${XMRIG_VERSION}/xmrig-${XMRIG_VERSION}-linux-static-x64.tar.gz"
+  tar -xzf "$tmp/xmrig.tar.gz" -C "$tmp"
+  install -d /opt/ruche/miners/xmrig
+  install -m 0755 "$(find "$tmp" -type f -name xmrig | head -n1)" /opt/ruche/miners/xmrig/xmrig
   rm -rf "$tmp"
 fi
 

@@ -10,14 +10,13 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"ruche/internal/protocol"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 type Config struct {
 	Server   string        // e.g. https://ruche.example.com
@@ -63,8 +62,9 @@ func LoadConfig(path string) (Config, error) {
 
 type Agent struct {
 	Cfg    Config
+	CPU    CPUReader
 	GPUs   GPUReader
-	Miner  Miner
+	Miners map[string]Miner // by protocol.Miner* name
 	Client *http.Client
 	// Reboot restarts the machine; replaced in tests.
 	Reboot func() error
@@ -77,7 +77,7 @@ type Agent struct {
 func (a *Agent) Run(ctx context.Context) {
 	a.started = time.Now()
 	if a.Reboot == nil {
-		a.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
+		a.Reboot = func() error { return rebootCommand().Run() }
 	}
 	t := time.NewTicker(a.Cfg.Interval)
 	defer t.Stop()
@@ -87,7 +87,7 @@ func (a *Agent) Run(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
-			a.Miner.Stop()
+			a.stopMiner()
 			return
 		case <-t.C:
 		}
@@ -104,26 +104,49 @@ func (a *Agent) Tick(ctx context.Context) error {
 	return nil
 }
 
+// miner returns the miner of the current flight sheet, or nil.
+func (a *Agent) miner() Miner {
+	if a.current == nil {
+		return nil
+	}
+	return a.Miners[a.current.Miner]
+}
+
+func (a *Agent) stopMiner() {
+	if m := a.miner(); m != nil {
+		m.Stop()
+	}
+}
+
 func (a *Agent) report(ctx context.Context) protocol.Report {
 	host, _ := os.Hostname()
-	gpus := a.GPUs.Read()
-	total, per := a.Miner.Hashrates(ctx)
-	for i := range gpus {
-		if i < len(per) {
-			gpus[i].HashrateMHs = per[i]
+	rep := protocol.Report{
+		Hostname:     host,
+		AgentVersion: Version,
+		UptimeS:      int64(time.Since(a.started).Seconds()),
+	}
+	if a.GPUs != nil {
+		rep.GPUs = a.GPUs.Read()
+	}
+	if a.CPU != nil {
+		cpu := a.CPU.Read()
+		rep.CPU = &cpu
+	}
+	m := a.miner()
+	if m == nil {
+		return rep
+	}
+	rep.Miner, rep.Algo, rep.FlightSheetID = a.current.Miner, a.current.Algo, a.current.ID
+	rep.MinerRunning = m.Running()
+	st := m.Stats(ctx)
+	rep.TotalHashrateHs = st.TotalHs
+	for i := range rep.GPUs {
+		if i < len(st.PerGPUHs) {
+			rep.GPUs[i].HashrateHs = st.PerGPUHs[i]
 		}
 	}
-	rep := protocol.Report{
-		Hostname:         host,
-		AgentVersion:     Version,
-		UptimeS:          int64(time.Since(a.started).Seconds()),
-		MinerRunning:     a.Miner.Running(),
-		TotalHashrateMHs: total,
-		GPUs:             gpus,
-	}
-	if a.current != nil {
-		rep.Miner = a.current.Miner
-		rep.FlightSheetID = a.current.ID
+	if a.current.Miner == protocol.MinerXMRig && rep.CPU != nil {
+		rep.CPU.HashrateHs, rep.CPU.MiningThreads, rep.CPU.HugePagesPct = st.TotalHs, st.CPUThreads, st.HugePagesPct
 	}
 	return rep
 }
@@ -157,12 +180,12 @@ func (a *Agent) apply(resp protocol.ReportResponse) {
 		switch c.Type {
 		case protocol.CmdStopMiner:
 			a.stopped = true
-			a.Miner.Stop()
+			a.stopMiner()
 		case protocol.CmdRestartMiner:
 			a.stopped = false
-			a.Miner.Stop()
+			a.stopMiner()
 		case protocol.CmdReboot:
-			a.Miner.Stop()
+			a.stopMiner()
 			if err := a.Reboot(); err != nil {
 				log.Printf("redémarrage impossible: %v", err)
 			}
@@ -173,20 +196,25 @@ func (a *Agent) apply(resp protocol.ReportResponse) {
 	case resp.FlightSheet == nil:
 		if a.current != nil {
 			log.Printf("plus de flight sheet: arrêt du mineur")
-			a.Miner.Stop()
+			a.stopMiner()
 			a.current = nil
 		}
 		return
 	case a.current == nil || *a.current != *resp.FlightSheet:
 		log.Printf("nouvelle flight sheet: %s", resp.FlightSheet.Name)
+		a.stopMiner()
 		fs := *resp.FlightSheet
 		a.current = &fs
-		a.Miner.Stop()
 	}
 
+	m := a.miner()
+	if m == nil {
+		log.Printf("mineur %q non disponible sur ce rig", a.current.Miner)
+		return
+	}
 	// Start (or restart after a crash) unless the user stopped mining.
-	if !a.stopped && !a.Miner.Running() {
-		if err := a.Miner.Start(*a.current); err != nil {
+	if !a.stopped && !m.Running() {
+		if err := m.Start(*a.current); err != nil {
 			log.Printf("démarrage du mineur impossible: %v", err)
 		}
 	}

@@ -29,12 +29,18 @@
       <div class="section-head"><h2>Flight sheets</h2></div>
       <form id="fs-form" class="grid-form">
         <input type="hidden" name="id">
-        <label>Nom<input name="name" required placeholder="ETC sur 2Miners"></label>
-        <label>Algorithme<input name="algo" required placeholder="ETCHASH"></label>
-        <label>Pool<input name="pool" required placeholder="etc.2miners.com:1010"></label>
-        <label>Wallet<input name="wallet" required placeholder="0x…"></label>
-        <label>Worker<input name="worker" placeholder="rig1"></label>
-        <label>Arguments en plus<input name="extra_args" placeholder="--tstop 85"></label>
+        <label>Nom<input name="name" required placeholder="Monero sur SupportXMR"></label>
+        <label>Mineur
+          <select name="miner">
+            <option value="xmrig">XMRig (processeur)</option>
+            <option value="lolminer">lolMiner (carte graphique)</option>
+          </select>
+        </label>
+        <label>Algorithme<input name="algo" required placeholder="rx/0"></label>
+        <label>Pool<input name="pool" required placeholder="pool.supportxmr.com:3333"></label>
+        <label>Wallet<input name="wallet" required placeholder="4…"></label>
+        <label>Worker<input name="worker" placeholder="mon-pc"></label>
+        <label>Arguments en plus<input name="extra_args" placeholder="--threads 6"></label>
         <div class="actions">
           <button>Enregistrer</button>
           <button type="reset" class="secondary">Nouveau</button>

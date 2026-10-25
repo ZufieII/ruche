@@ -1,0 +1,44 @@
+RUCHE 0.2 - TEST SOUS WINDOWS
+=============================
+
+1. Demarrer le serveur
+   Double-clique sur 1-demarrer-serveur.bat.
+   Le navigateur s'ouvre sur http://localhost:8080.
+   Nom d'utilisateur : ce que tu veux. Mot de passe : ruche1234
+   Laisse la fenetre noire ouverte tant que tu testes.
+
+2. Creer ton rig
+   Dans le tableau de bord, tape un nom (par exemple "mon-pc") et clique sur Ajouter.
+   Clique sur "Telecharger rig.conf", puis deplace ce fichier depuis
+   Telechargements jusque dans ce dossier (a cote de ruche-agent.exe).
+
+3. Creer une flight sheet
+   Mineur : XMRig (processeur)
+   Algorithme : rx/0
+   Pool : pool.supportxmr.com:3333
+   Wallet : ton adresse Monero (elle commence par 4)
+   Worker : mon-pc
+   Enregistre, puis choisis cette flight sheet dans la ligne de ton rig.
+
+4. Installer XMRig
+   Double-clique sur 2-installer-xmrig.bat.
+   Windows Defender considere souvent XMRig comme dangereux, car des virus
+   l'utilisent pour miner en cachette. Si le telechargement est bloque, il
+   faut ajouter une exclusion pour ce dossier dans
+   Securite Windows > Protection contre les virus > Exclusions.
+   Ne fais ca que si tu as compris ce que tu autorises.
+
+5. Lancer le minage
+   Double-clique sur 3-demarrer-agent.bat.
+   En une minute environ, ton PC apparait "En ligne" avec son hashrate.
+
+Juste pour voir sans miner : apres l'etape 2, lance demo-sans-minage.bat
+a la place des etapes 3 a 5.
+
+Bon a savoir
+- Sous Windows, la temperature du processeur n'est pas encore affichee.
+- Les "huge pages" accelerent XMRig. Pour les activer, lance une fois
+  3-demarrer-agent.bat en tant qu'administrateur puis redemarre le PC.
+- Le minage CPU fait chauffer le PC et consomme de l'electricite. Verifie que
+  ca reste rentable pour toi.
+- Pour tout arreter : ferme les fenetres noires.

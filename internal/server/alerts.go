@@ -81,12 +81,16 @@ func (a *Alerter) Check(ctx context.Context) error {
 		a.offline[r.ID] = !r.Online
 
 		var hottest float64
+		part := "un GPU"
 		for _, g := range r.Report.GPUs {
 			hottest = max(hottest, g.TempC)
 		}
+		if c := r.Report.CPU; c != nil && c.TempC > hottest {
+			hottest, part = c.TempC, "le processeur"
+		}
 		isHot := r.Online && hottest >= a.MaxTempC
 		if isHot && !a.hot[r.ID] {
-			a.notify(ctx, fmt.Sprintf("🔥 %s : un GPU atteint %.0f °C (seuil %.0f °C)", r.Name, hottest, a.MaxTempC))
+			a.notify(ctx, fmt.Sprintf("🔥 %s : %s atteint %.0f °C (seuil %.0f °C)", r.Name, part, hottest, a.MaxTempC))
 		}
 		a.hot[r.ID] = isHot
 	}

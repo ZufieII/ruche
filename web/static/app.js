@@ -24,6 +24,30 @@ function el(tag, attrs = {}, ...children) {
 }
 
 const fmt = (n, d = 1) => Number(n || 0).toFixed(d);
+const MINERS = { xmrig: "XMRig (CPU)", lolminer: "lolMiner (GPU)" };
+
+// hashrate formats hashes per second with a readable unit.
+function hashrate(hs) {
+  const units = ["H/s", "kH/s", "MH/s", "GH/s", "TH/s"];
+  let i = 0;
+  hs = Number(hs || 0);
+  while (hs >= 1000 && i < units.length - 1) {
+    hs /= 1000;
+    i++;
+  }
+  return `${hs.toFixed(hs < 10 && i > 0 ? 2 : 1)} ${units[i]}`;
+}
+
+function cpuCell(cpu, mining) {
+  if (!cpu) return "—";
+  const parts = [`${cpu.model || "Processeur"} · ${cpu.threads} threads`];
+  if (cpu.temp_c) parts.push(`${fmt(cpu.temp_c, 0)} °C`);
+  const lines = [el("div", {}, parts.join(" · "))];
+  if (mining) {
+    lines.push(el("div", {}, `${hashrate(cpu.hashrate_hs)} · ${cpu.mining_threads} threads de minage · huge pages ${fmt(cpu.huge_pages_pct, 0)} %`));
+  }
+  return lines;
+}
 
 function ago(ts) {
   if (!ts) return "jamais";
@@ -62,10 +86,10 @@ async function renderRigs() {
   const box = document.getElementById("rigs");
 
   const online = rigs.filter((r) => r.online);
-  const total = online.reduce((s, r) => s + r.report.total_hashrate_mhs, 0);
+  const total = online.reduce((s, r) => s + r.report.total_hashrate_hs, 0);
   const power = online.reduce((s, r) => s + (r.report.gpus || []).reduce((a, g) => a + g.power_w, 0), 0);
   document.getElementById("summary").textContent =
-    `${online.length}/${rigs.length} rigs en ligne · ${fmt(total)} MH/s · ${fmt(power, 0)} W`;
+    `${online.length}/${rigs.length} rigs en ligne · ${hashrate(total)}` + (power ? ` · ${fmt(power, 0)} W` : "");
 
   if (!rigs.length) {
     box.replaceChildren(el("p", { class: "empty" }, "Aucun rig pour l'instant. Ajoute-en un ci-dessus."));
@@ -76,7 +100,8 @@ async function renderRigs() {
 
   const rows = rigs.map((rig, i) => {
     const gpus = rig.report.gpus || [];
-    const hottest = Math.max(0, ...gpus.map((g) => g.temp_c));
+    const cpu = rig.report.cpu;
+    const hottest = Math.max(0, cpu ? cpu.temp_c : 0, ...gpus.map((g) => g.temp_c));
     const select = el("select", {
       onchange: async (e) => {
         const id = e.target.value ? Number(e.target.value) : null;
@@ -90,10 +115,14 @@ async function renderRigs() {
       el("td", {}, el("span", { class: `status ${rig.online ? "on" : "off"}` }, rig.online ? "En ligne" : "Hors ligne"),
         el("div", { class: "muted" }, ago(rig.last_seen)),
         rig.online && !rig.report.miner_running ? el("div", { class: "muted" }, "mineur arrêté") : ""),
-      el("td", {}, `${fmt(rig.report.total_hashrate_mhs)} MH/s`, sparkline(histories[i])),
-      el("td", { class: hottest >= MAX_TEMP ? "hot" : "" }, gpus.length ? `${fmt(hottest, 0)} °C` : "—"),
-      el("td", { class: "gpus" }, gpus.map((g) =>
-        el("div", {}, `#${g.index} ${g.name} · ${fmt(g.hashrate_mhs)} MH/s · ${fmt(g.temp_c, 0)} °C · ${fmt(g.fan_pct, 0)} % · ${fmt(g.power_w, 0)} W`))),
+      el("td", {}, hashrate(rig.report.total_hashrate_hs),
+        rig.report.algo ? el("div", { class: "muted" }, `${rig.report.algo} · ${MINERS[rig.report.miner] || rig.report.miner}`) : "",
+        sparkline(histories[i])),
+      el("td", { class: hottest >= MAX_TEMP ? "hot" : "" }, hottest ? `${fmt(hottest, 0)} °C` : "—"),
+      el("td", { class: "gpus" },
+        cpuCell(cpu, rig.report.miner === "xmrig" && rig.report.miner_running),
+        gpus.map((g) =>
+          el("div", {}, `GPU #${g.index} ${g.name} · ${hashrate(g.hashrate_hs)} · ${fmt(g.temp_c, 0)} °C · ${fmt(g.fan_pct, 0)} % · ${fmt(g.power_w, 0)} W`))),
       el("td", {}, select),
       el("td", {}, el("div", { class: "row-actions" },
         el("button", { class: "secondary", onclick: () => command(rig, "restart_miner", "Redémarrage du mineur") }, "Relancer mineur"),
@@ -111,7 +140,7 @@ async function renderRigs() {
   });
 
   box.replaceChildren(el("div", { class: "table-wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, ["Rig", "État", "Hashrate", "Temp. max", "GPU", "Flight sheet", "Actions"].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["Rig", "État", "Hashrate", "Temp. max", "Matériel", "Flight sheet", "Actions"].map((h) => el("th", {}, h)))),
     el("tbody", {}, rows))));
 }
 
@@ -124,9 +153,10 @@ async function renderFlightSheets() {
   }
   const form = document.getElementById("fs-form");
   box.replaceChildren(el("div", { class: "table-wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, ["Nom", "Algo", "Pool", "Wallet", ""].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["Nom", "Mineur", "Algo", "Pool", "Wallet", ""].map((h) => el("th", {}, h)))),
     el("tbody", {}, flightSheets.map((fs) => el("tr", {},
       el("td", {}, el("strong", {}, fs.name)),
+      el("td", {}, MINERS[fs.miner] || fs.miner),
       el("td", {}, fs.algo),
       el("td", {}, fs.pool),
       el("td", { class: "muted" }, `${fs.wallet.slice(0, 10)}…${fs.worker ? "." + fs.worker : ""}`),
@@ -134,7 +164,7 @@ async function renderFlightSheets() {
         el("button", {
           class: "secondary",
           onclick: () => {
-            for (const k of ["id", "name", "algo", "pool", "wallet", "worker", "extra_args"]) form.elements[k].value = fs[k] ?? "";
+            for (const k of ["id", "name", "miner", "algo", "pool", "wallet", "worker", "extra_args"]) form.elements[k].value = fs[k] ?? "";
             form.scrollIntoView({ behavior: "smooth" });
           },
         }, "Modifier"),
@@ -164,11 +194,18 @@ document.getElementById("add-rig").addEventListener("submit", async (e) => {
   e.target.reset();
   const notice = document.getElementById("new-rig");
   notice.hidden = false;
+  const conf = `server=${location.origin}\ntoken=${rig.token}\n`;
+  const download = el("a", {
+    class: "button",
+    download: "rig.conf",
+    href: URL.createObjectURL(new Blob([conf], { type: "text/plain" })),
+  }, "Télécharger rig.conf");
   notice.replaceChildren(
     el("strong", {}, `Rig « ${rig.name} » créé.`),
-    " Copie ce fichier dans /etc/ruche/rig.conf sur le rig. Le token ne sera plus affiché.",
-    el("pre", {}, `server=${location.origin}\ntoken=${rig.token}`),
-    el("button", { class: "secondary", onclick: () => (notice.hidden = true) }, "J'ai copié"),
+    " Télécharge son fichier rig.conf et place-le à côté de ruche-agent.exe (Windows) ou dans /etc/ruche/ (Linux). Le token ne sera plus affiché.",
+    el("pre", {}, conf),
+    el("div", { class: "row-actions" }, download,
+      el("button", { class: "secondary", onclick: () => (notice.hidden = true) }, "Fermer")),
   );
   refresh();
 });
@@ -181,6 +218,7 @@ document.getElementById("fs-form").addEventListener("submit", async (e) => {
   await api(id ? "PUT" : "POST", id ? `/api/flight-sheets/${id}` : "/api/flight-sheets", data);
   e.target.reset();
   e.target.elements.id.value = "";
+  e.target.elements.miner.value = "xmrig";
   refresh();
 });
 
