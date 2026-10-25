@@ -79,3 +79,40 @@ func TestBadCommandRejected(t *testing.T) {
 		t.Fatal("unknown command accepted")
 	}
 }
+
+func TestMarketSource(t *testing.T) {
+	calls := 0
+	priceUp := true
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch r.URL.Path {
+		case "/network":
+			w.Write([]byte(`{"difficulty":400000000000,"hash":"ab","height":3300000,"value":600000000000,"ts":1}`))
+		case "/price":
+			if !priceUp {
+				http.Error(w, "rate limited", http.StatusTooManyRequests)
+				return
+			}
+			w.Write([]byte(`{"monero":{"eur":150.5,"usd":170.25}}`))
+		}
+	}))
+	defer api.Close()
+	m := &MarketSource{NetworkURL: api.URL + "/network", PriceURL: api.URL + "/price", TTL: time.Hour, Client: api.Client()}
+
+	got := m.Get(context.Background())
+	if got.Difficulty != 4e11 || got.RewardXMR != 0.6 || got.PriceEUR != 150.5 || got.Error != "" {
+		t.Fatalf("got %+v", got)
+	}
+	m.Get(context.Background())
+	if calls != 2 {
+		t.Fatalf("cache not used: %d calls", calls)
+	}
+
+	// Price API down: network stats still come back, with an error note.
+	m.TTL = 0
+	priceUp = false
+	got = m.Get(context.Background())
+	if got.Difficulty != 4e11 || got.PriceEUR != 0 || got.Error == "" {
+		t.Fatalf("got %+v", got)
+	}
+}

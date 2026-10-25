@@ -57,9 +57,13 @@ func main() {
 		}
 	}()
 
+	market := server.NewMarketSource()
+	market.NetworkURL = env("RUCHE_XMR_NETWORK_URL", market.NetworkURL)
+	market.PriceURL = env("RUCHE_XMR_PRICE_URL", market.PriceURL)
+
 	srv := &http.Server{
 		Addr:              env("RUCHE_LISTEN", ":8080"),
-		Handler:           (&server.Server{Store: store, AdminPassword: password, Static: web.FS}).Handler(),
+		Handler:           (&server.Server{Store: store, AdminPassword: password, Static: web.FS, Market: market}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

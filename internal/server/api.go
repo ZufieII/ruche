@@ -26,6 +26,7 @@ type Server struct {
 	Store         *Store
 	AdminPassword string
 	Static        fs.FS
+	Market        *MarketSource // nil disables earnings estimates
 }
 
 func (s *Server) Handler() http.Handler {
@@ -42,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("GET /api/rigs/{id}/history", s.handleHistory)
 	admin.HandleFunc("POST /api/rigs/{id}/commands", s.handleCommand)
 	admin.HandleFunc("PUT /api/rigs/{id}/flight-sheet", s.handleAssign)
+	admin.HandleFunc("GET /api/market/xmr", s.handleMarket)
 	admin.HandleFunc("GET /api/flight-sheets", s.handleListFlightSheets)
 	admin.HandleFunc("POST /api/flight-sheets", s.handleSaveFlightSheet)
 	admin.HandleFunc("PUT /api/flight-sheets/{id}", s.handleSaveFlightSheet)
@@ -248,4 +250,12 @@ func (s *Server) handleDeleteFlightSheet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleMarket(w http.ResponseWriter, r *http.Request) {
+	if s.Market == nil {
+		writeJSON(w, Market{Error: "désactivé"})
+		return
+	}
+	writeJSON(w, s.Market.Get(r.Context()))
 }

@@ -4,6 +4,18 @@ const MAX_TEMP = 80;
 let flightSheets = [];
 let lastRigs = [];
 let detailRigId = null;
+let market = null;
+
+// earnings estimates a Monero (RandomX) miner's gross daily income at the
+// current network difficulty, before pool fees. Returns null when unknown.
+function earnings(hs, rep) {
+  if (!market || !market.difficulty || rep.miner !== "xmrig" || !/^rx\/0$/i.test(rep.algo || "")) return null;
+  const xmr = (hs * 86400 / market.difficulty) * market.reward_xmr;
+  return { xmr, eur: market.price_eur ? xmr * market.price_eur : null, usd: market.price_usd ? xmr * market.price_usd : null };
+}
+
+const money = (v, cur) => v === null ? "—" : `${v < 1 ? v.toFixed(3) : v.toFixed(2)} ${cur}`;
+const xmrFmt = (v) => `${v.toFixed(v < 0.01 ? 5 : 4)} XMR`;
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -91,8 +103,12 @@ async function renderRigs() {
   const online = rigs.filter((r) => r.online);
   const total = online.reduce((s, r) => s + r.report.total_hashrate_hs, 0);
   const power = online.reduce((s, r) => s + (r.report.gpus || []).reduce((a, g) => a + g.power_w, 0), 0);
+  const gains = online.map((r) => earnings(r.report.total_hashrate_hs, r.report)).filter(Boolean);
+  const dayXMR = gains.reduce((s, g) => s + g.xmr, 0);
+  const dayEUR = gains.every((g) => g.eur !== null) ? gains.reduce((s, g) => s + g.eur, 0) : null;
   document.getElementById("summary").textContent =
-    `${online.length}/${rigs.length} rigs en ligne · ${hashrate(total)}` + (power ? ` · ${fmt(power, 0)} W` : "");
+    `${online.length}/${rigs.length} rigs en ligne · ${hashrate(total)}` + (power ? ` · ${fmt(power, 0)} W` : "") +
+    (gains.length ? ` · ≈ ${xmrFmt(dayXMR)}` + (dayEUR !== null ? ` (${money(dayEUR, "€")})` : "") + " par jour" : "");
 
   if (!rigs.length) {
     box.replaceChildren(el("p", { class: "empty" }, "Aucun rig pour l'instant. Ajoute-en un ci-dessus."));
@@ -243,6 +259,27 @@ function chart(points) {
   return c;
 }
 
+function gainSection(gain, basis, avg) {
+  if (!gain) return "";
+  const rows = [["Par jour", 1], ["Par semaine", 7], ["Par mois (30 j)", 30]];
+  const updated = market.updated_at ? ago(market.updated_at) : "—";
+  return el("section", {},
+    el("h3", {}, "Gain théorique"),
+    el("div", { class: "table-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["", "XMR", "Euros", "Dollars"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.map(([label, k]) => el("tr", {},
+        el("td", {}, label),
+        el("td", {}, xmrFmt(gain.xmr * k)),
+        el("td", {}, money(gain.eur === null ? null : gain.eur * k, "€")),
+        el("td", {}, money(gain.usd === null ? null : gain.usd * k, "$"))))))),
+    el("p", { class: "muted", style: "font-size:13px;margin:8px 0 0" },
+      `Calculé sur ${avg ? "la moyenne des 24 dernières heures" : "le hashrate actuel"} (${hashrate(basis)}), ` +
+      `avec la difficulté réseau actuelle et une récompense de ${market.reward_xmr.toFixed(3)} XMR par bloc` +
+      (market.price_eur ? `, 1 XMR = ${market.price_eur.toFixed(2)} €` : "") +
+      `. Avant frais du pool et sans compter l'électricité. Données mises à jour ${updated}.` +
+      (market.error ? ` (${market.error})` : "")));
+}
+
 async function openDetail(id) {
   detailRigId = id;
   await renderDetail();
@@ -264,6 +301,8 @@ async function renderDetail() {
   const history = await api("GET", `/api/rigs/${rig.id}/history?hours=24`).catch(() => []);
   const avg = history.length ? history.reduce((s, p) => s + p.hashrate, 0) / history.length : 0;
   const hottest = Math.max(0, cpu ? cpu.temp_c : 0, ...gpus.map((g) => g.temp_c));
+  const basis = avg || rep.total_hashrate_hs;
+  const gain = earnings(basis, rep);
   const logBox = dlg.querySelector("pre.log");
   const logAtBottom = !logBox || logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 8;
 
@@ -318,7 +357,9 @@ async function renderDetail() {
         card(hashrate(avg), "Moyenne 24 h"),
         card(hottest ? `${fmt(hottest, 0)} °C` : "—", "Temp. max"),
         card(rep.miner_running ? "En cours" : "Arrêté", MINERS[rep.miner] || "Mineur"),
-        card(duration(rep.system_uptime_s || rep.uptime_s), rep.system_uptime_s ? "Allumé depuis" : "Agent lancé depuis")),
+        card(duration(rep.system_uptime_s || rep.uptime_s), rep.system_uptime_s ? "Allumé depuis" : "Agent lancé depuis"),
+        gain ? card(gain.eur !== null ? `≈ ${money(gain.eur, "€")}` : `≈ ${xmrFmt(gain.xmr)}`, "Gain théorique / jour") : ""),
+      gainSection(gain, basis, avg),
       el("section", {},
         el("h3", {}, "Dernières 24 heures"),
         chart(history),
@@ -348,6 +389,7 @@ async function renderDetail() {
 
 async function refresh() {
   try {
+    market = await api("GET", "/api/market/xmr").catch(() => null);
     await renderFlightSheets();
     await renderRigs();
     if (detailRigId && document.getElementById("rig-detail").open) await renderDetail();
