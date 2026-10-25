@@ -1,0 +1,16 @@
+# Lance le serveur Ruche : docker compose up -d
+services:
+  ruche:
+    build: ..
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      RUCHE_ADMIN_PASSWORD: ${RUCHE_ADMIN_PASSWORD:?définis RUCHE_ADMIN_PASSWORD dans deploy/.env}
+      RUCHE_MAX_TEMP: ${RUCHE_MAX_TEMP:-80}
+      RUCHE_TELEGRAM_TOKEN: ${RUCHE_TELEGRAM_TOKEN:-}
+      RUCHE_TELEGRAM_CHAT_ID: ${RUCHE_TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ruche-data:/data
+volumes:
+  ruche-data:

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ruche</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🐝 Ruche</h1>
+    <div id="summary"></div>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-head">
+        <h2>Rigs</h2>
+        <form id="add-rig">
+          <input name="name" placeholder="Nom du nouveau rig" required>
+          <button>Ajouter</button>
+        </form>
+      </div>
+      <div id="new-rig" class="notice" hidden></div>
+      <div id="rigs"></div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Flight sheets</h2></div>
+      <form id="fs-form" class="grid-form">
+        <input type="hidden" name="id">
+        <label>Nom<input name="name" required placeholder="ETC sur 2Miners"></label>
+        <label>Algorithme<input name="algo" required placeholder="ETCHASH"></label>
+        <label>Pool<input name="pool" required placeholder="etc.2miners.com:1010"></label>
+        <label>Wallet<input name="wallet" required placeholder="0x…"></label>
+        <label>Worker<input name="worker" placeholder="rig1"></label>
+        <label>Arguments en plus<input name="extra_args" placeholder="--tstop 85"></label>
+        <div class="actions">
+          <button>Enregistrer</button>
+          <button type="reset" class="secondary">Nouveau</button>
+        </div>
+      </form>
+      <div id="flight-sheets"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

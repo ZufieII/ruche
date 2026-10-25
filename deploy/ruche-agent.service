@@ -1,0 +1,12 @@
+[Unit]
+Description=Agent Ruche (pilotage du rig de minage)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ruche-agent -config /etc/ruche/rig.conf
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
