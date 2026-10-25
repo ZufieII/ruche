@@ -1,0 +1,15 @@
+[Unit]
+Description=Serveur Ruche (tableau de bord des rigs de minage)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ruche
+EnvironmentFile=/etc/ruche/server.env
+Environment=RUCHE_DB=/var/lib/ruche/ruche.db
+ExecStart=/usr/local/bin/ruche-server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
