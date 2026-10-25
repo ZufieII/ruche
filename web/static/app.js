@@ -5,6 +5,18 @@ let flightSheets = [];
 let lastRigs = [];
 let detailRigId = null;
 let market = null;
+let settings = { electricity_eur_kwh: 0 };
+
+// rigPower is the rig's wall power in watts: typed in by hand, else the GPUs' sum.
+function rigPower(rig) {
+  return rig.power_w || (rig.report.gpus || []).reduce((s, g) => s + g.power_w, 0);
+}
+
+// electricityPerDay returns the daily electricity cost in euros, or null when unknown.
+function electricityPerDay(watts) {
+  if (!settings.electricity_eur_kwh || !watts) return null;
+  return (watts * 24 / 1000) * settings.electricity_eur_kwh;
+}
 
 // earnings estimates a Monero (RandomX) miner's gross daily income at the
 // current network difficulty, before pool fees. Returns null when unknown.
@@ -14,7 +26,7 @@ function earnings(hs, rep) {
   return { xmr, eur: market.price_eur ? xmr * market.price_eur : null, usd: market.price_usd ? xmr * market.price_usd : null };
 }
 
-const money = (v, cur) => v === null ? "—" : `${v < 1 ? v.toFixed(3) : v.toFixed(2)} ${cur}`;
+const money = (v, cur) => v === null ? "—" : `${Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(2)} ${cur}`;
 const xmrFmt = (v) => `${v.toFixed(v < 0.01 ? 5 : 4)} XMR`;
 
 async function api(method, path, body) {
@@ -103,12 +115,18 @@ async function renderRigs() {
   const online = rigs.filter((r) => r.online);
   const total = online.reduce((s, r) => s + r.report.total_hashrate_hs, 0);
   const power = online.reduce((s, r) => s + (r.report.gpus || []).reduce((a, g) => a + g.power_w, 0), 0);
-  const gains = online.map((r) => earnings(r.report.total_hashrate_hs, r.report)).filter(Boolean);
-  const dayXMR = gains.reduce((s, g) => s + g.xmr, 0);
-  const dayEUR = gains.every((g) => g.eur !== null) ? gains.reduce((s, g) => s + g.eur, 0) : null;
+  const mining = online.map((r) => ({ g: earnings(r.report.total_hashrate_hs, r.report), cost: electricityPerDay(rigPower(r)) }))
+    .filter((x) => x.g);
+  const dayXMR = mining.reduce((s, x) => s + x.g.xmr, 0);
+  const dayEUR = mining.every((x) => x.g.eur !== null) ? mining.reduce((s, x) => s + x.g.eur, 0) : null;
+  const dayCost = mining.every((x) => x.cost !== null) ? mining.reduce((s, x) => s + x.cost, 0) : null;
+  let gainText = "";
+  if (mining.length) {
+    gainText = ` · ≈ ${xmrFmt(dayXMR)}` + (dayEUR !== null ? ` (${money(dayEUR, "€")})` : "") + " par jour";
+    if (dayEUR !== null && dayCost !== null) gainText += ` · net ${money(dayEUR - dayCost, "€")}/jour`;
+  }
   document.getElementById("summary").textContent =
-    `${online.length}/${rigs.length} rigs en ligne · ${hashrate(total)}` + (power ? ` · ${fmt(power, 0)} W` : "") +
-    (gains.length ? ` · ≈ ${xmrFmt(dayXMR)}` + (dayEUR !== null ? ` (${money(dayEUR, "€")})` : "") + " par jour" : "");
+    `${online.length}/${rigs.length} rigs en ligne · ${hashrate(total)}` + (power ? ` · ${fmt(power, 0)} W` : "") + gainText;
 
   if (!rigs.length) {
     box.replaceChildren(el("p", { class: "empty" }, "Aucun rig pour l'instant. Ajoute-en un ci-dessus."));
@@ -259,25 +277,55 @@ function chart(points) {
   return c;
 }
 
-function gainSection(gain, basis, avg) {
+function gainSection(rig, gain, basis, avg) {
   if (!gain) return "";
+  const watts = rigPower(rig);
+  const cost = electricityPerDay(watts);
   const rows = [["Par jour", 1], ["Par semaine", 7], ["Par mois (30 j)", 30]];
   const updated = market.updated_at ? ago(market.updated_at) : "—";
+  const netCell = (k) => {
+    if (gain.eur === null || cost === null) return el("td", { class: "muted" }, "—");
+    const net = (gain.eur - cost) * k;
+    return el("td", { class: net >= 0 ? "net-pos" : "net-neg" }, money(net, "€"));
+  };
+  const powerInput = el("input", {
+    type: "number", min: "0", max: "100000", step: "1", placeholder: "ex. 180", inputmode: "numeric",
+    value: rig.power_w || "",
+    onchange: async (e) => {
+      await api("PUT", `/api/rigs/${rig.id}/power`, { power_w: Number(e.target.value) || 0 });
+      refresh();
+    },
+  });
+  const hints = [];
+  if (!settings.electricity_eur_kwh) hints.push("Indique le prix de l'électricité en haut de la page pour voir le gain net.");
+  if (!watts) hints.push("Indique la consommation du rig (mesurée à la prise si possible) pour voir le gain net.");
   return el("section", {},
     el("h3", {}, "Gain théorique"),
+    el("div", { class: "power-row" },
+      "Consommation du rig :", powerInput, "W",
+      !rig.power_w && watts ? el("span", {}, `(${fmt(watts, 0)} W mesurés sur les GPU)`) : ""),
     el("div", { class: "table-wrap" }, el("table", {},
-      el("thead", {}, el("tr", {}, ["", "XMR", "Euros", "Dollars"].map((h) => el("th", {}, h)))),
+      el("thead", {}, el("tr", {}, ["", "XMR", "Brut", "Électricité", "Net"].map((h) => el("th", {}, h)))),
       el("tbody", {}, rows.map(([label, k]) => el("tr", {},
         el("td", {}, label),
         el("td", {}, xmrFmt(gain.xmr * k)),
         el("td", {}, money(gain.eur === null ? null : gain.eur * k, "€")),
-        el("td", {}, money(gain.usd === null ? null : gain.usd * k, "$"))))))),
+        el("td", {}, cost === null ? "—" : `− ${money(cost * k, "€")}`),
+        netCell(k)))))),
+    hints.length ? el("p", { style: "font-size:13px;margin:8px 0 0" }, hints.join(" ")) : "",
     el("p", { class: "muted", style: "font-size:13px;margin:8px 0 0" },
       `Calculé sur ${avg ? "la moyenne des 24 dernières heures" : "le hashrate actuel"} (${hashrate(basis)}), ` +
       `avec la difficulté réseau actuelle et une récompense de ${market.reward_xmr.toFixed(3)} XMR par bloc` +
       (market.price_eur ? `, 1 XMR = ${market.price_eur.toFixed(2)} €` : "") +
-      `. Avant frais du pool et sans compter l'électricité. Données mises à jour ${updated}.` +
+      (cost !== null ? `, ${fmt(watts, 0)} W à ${settings.electricity_eur_kwh} €/kWh` : "") +
+      `. Avant frais du pool. Données mises à jour ${updated}.` +
       (market.error ? ` (${market.error})` : "")));
+}
+
+function gainCard(rig, gain) {
+  const cost = electricityPerDay(rigPower(rig));
+  if (gain.eur !== null && cost !== null) return card(money(gain.eur - cost, "€"), "Gain net / jour");
+  return card(gain.eur !== null ? `≈ ${money(gain.eur, "€")}` : `≈ ${xmrFmt(gain.xmr)}`, "Gain brut / jour");
 }
 
 async function openDetail(id) {
@@ -358,8 +406,8 @@ async function renderDetail() {
         card(hottest ? `${fmt(hottest, 0)} °C` : "—", "Temp. max"),
         card(rep.miner_running ? "En cours" : "Arrêté", MINERS[rep.miner] || "Mineur"),
         card(duration(rep.system_uptime_s || rep.uptime_s), rep.system_uptime_s ? "Allumé depuis" : "Agent lancé depuis"),
-        gain ? card(gain.eur !== null ? `≈ ${money(gain.eur, "€")}` : `≈ ${xmrFmt(gain.xmr)}`, "Gain théorique / jour") : ""),
-      gainSection(gain, basis, avg),
+        gain ? gainCard(rig, gain) : ""),
+      gainSection(rig, gain, basis, avg),
       el("section", {},
         el("h3", {}, "Dernières 24 heures"),
         chart(history),
@@ -390,9 +438,15 @@ async function renderDetail() {
 async function refresh() {
   try {
     market = await api("GET", "/api/market/xmr").catch(() => null);
+    settings = await api("GET", "/api/settings").catch(() => settings);
+    const elec = document.getElementById("settings").elements.electricity_eur_kwh;
+    if (document.activeElement !== elec) elec.value = settings.electricity_eur_kwh || "";
     await renderFlightSheets();
     await renderRigs();
-    if (detailRigId && document.getElementById("rig-detail").open) await renderDetail();
+    const dlg = document.getElementById("rig-detail");
+    // Don't wipe a field the user is typing in.
+    if (detailRigId && dlg.open && !dlg.contains(document.activeElement)) await renderDetail();
+    else if (detailRigId && dlg.open && document.activeElement.tagName !== "INPUT") await renderDetail();
   } catch (e) {
     console.error(e);
   }
@@ -434,6 +488,13 @@ document.getElementById("fs-form").addEventListener("submit", async (e) => {
 });
 
 document.getElementById("rig-detail").addEventListener("close", () => (detailRigId = null));
+
+document.getElementById("settings").addEventListener("submit", (e) => e.preventDefault());
+document.getElementById("settings").elements.electricity_eur_kwh.addEventListener("change", async (e) => {
+  const v = Number(String(e.target.value).replace(",", ".")) || 0;
+  settings = await api("PUT", "/api/settings", { electricity_eur_kwh: v });
+  refresh();
+});
 
 refresh();
 setInterval(refresh, 10000);

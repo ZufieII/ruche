@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"ruche/internal/protocol"
@@ -40,6 +42,10 @@ CREATE TABLE IF NOT EXISTS stats (
 	power REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS stats_rig_ts ON stats(rig_id, ts);
+CREATE TABLE IF NOT EXISTS settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS commands (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	rig_id TEXT NOT NULL REFERENCES rigs(id) ON DELETE CASCADE,
@@ -56,6 +62,7 @@ type Rig struct {
 	ID            string          `json:"id"`
 	Name          string          `json:"name"`
 	FlightSheetID *int64          `json:"flight_sheet_id"`
+	PowerW        float64         `json:"power_w"` // set by hand, for earnings; 0 = unknown
 	LastSeen      int64           `json:"last_seen"`
 	Online        bool            `json:"online"`
 	Report        protocol.Report `json:"report"`
@@ -82,6 +89,14 @@ func OpenStore(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
+	}
+	// Columns added after 0.3. SQLite has no ADD COLUMN IF NOT EXISTS.
+	for _, stmt := range []string{
+		`ALTER TABLE rigs ADD COLUMN power_w REAL NOT NULL DEFAULT 0`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return nil, err
+		}
 	}
 	return &Store{db: db, OfflineAfter: 2 * time.Minute}, nil
 }
@@ -120,7 +135,7 @@ func (s *Store) RigByToken(token string) (string, error) {
 }
 
 func (s *Store) Rigs() ([]Rig, error) {
-	rows, err := s.db.Query(`SELECT id, name, flight_sheet_id, last_seen, last_report FROM rigs ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, flight_sheet_id, power_w, last_seen, last_report FROM rigs ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +145,7 @@ func (s *Store) Rigs() ([]Rig, error) {
 		var r Rig
 		var fs sql.NullInt64
 		var report string
-		if err := rows.Scan(&r.ID, &r.Name, &fs, &r.LastSeen, &report); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &fs, &r.PowerW, &r.LastSeen, &report); err != nil {
 			return nil, err
 		}
 		if fs.Valid {
@@ -238,6 +253,33 @@ func (s *Store) QueueCommand(rigID, typ string) error {
 func (s *Store) AssignFlightSheet(rigID string, fsID *int64) error {
 	res, err := s.db.Exec(`UPDATE rigs SET flight_sheet_id = ? WHERE id = ?`, fsID, rigID)
 	return notFoundIfNone(res, err)
+}
+
+func (s *Store) SetRigPower(rigID string, watts float64) error {
+	res, err := s.db.Exec(`UPDATE rigs SET power_w = ? WHERE id = ?`, watts, rigID)
+	return notFoundIfNone(res, err)
+}
+
+// Settings are dashboard-wide preferences.
+type Settings struct {
+	ElectricityPerKWh float64 `json:"electricity_eur_kwh"`
+}
+
+func (s *Store) Settings() (Settings, error) {
+	var out Settings
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = 'electricity_eur_kwh'`).Scan(&v)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return out, err
+	}
+	out.ElectricityPerKWh, _ = strconv.ParseFloat(v, 64)
+	return out, nil
+}
+
+func (s *Store) SaveSettings(set Settings) error {
+	_, err := s.db.Exec(`INSERT INTO settings (key, value) VALUES ('electricity_eur_kwh', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, strconv.FormatFloat(set.ElectricityPerKWh, 'f', -1, 64))
+	return err
 }
 
 func (s *Store) FlightSheets() ([]protocol.FlightSheet, error) {

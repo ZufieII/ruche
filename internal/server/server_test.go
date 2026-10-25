@@ -116,3 +116,42 @@ func TestMarketSource(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestSettingsAndPower(t *testing.T) {
+	s := newStore(t)
+	if set, err := s.Settings(); err != nil || set.ElectricityPerKWh != 0 {
+		t.Fatalf("default settings: %+v %v", set, err)
+	}
+	s.SaveSettings(Settings{ElectricityPerKWh: 0.2516})
+	s.SaveSettings(Settings{ElectricityPerKWh: 0.2276})
+	if set, _ := s.Settings(); set.ElectricityPerKWh != 0.2276 {
+		t.Fatalf("got %+v", set)
+	}
+	rig, _, _ := s.CreateRig("rig-a")
+	if err := s.SetRigPower(rig.ID, 180); err != nil {
+		t.Fatal(err)
+	}
+	rigs, _ := s.Rigs()
+	if rigs[0].PowerW != 180 {
+		t.Fatalf("got %+v", rigs[0])
+	}
+	if err := s.SetRigPower("nope", 1); err != ErrNotFound {
+		t.Fatalf("want not found, got %v", err)
+	}
+}
+
+func TestMigrationKeepsOldDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	s, _ := OpenStore(path)
+	s.CreateRig("rig-a")
+	s.Close()
+	// Reopening runs the ALTER again, which must be harmless.
+	s2, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if rigs, _ := s2.Rigs(); len(rigs) != 1 {
+		t.Fatal("rig lost after reopening")
+	}
+}

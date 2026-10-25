@@ -43,6 +43,9 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("GET /api/rigs/{id}/history", s.handleHistory)
 	admin.HandleFunc("POST /api/rigs/{id}/commands", s.handleCommand)
 	admin.HandleFunc("PUT /api/rigs/{id}/flight-sheet", s.handleAssign)
+	admin.HandleFunc("PUT /api/rigs/{id}/power", s.handleRigPower)
+	admin.HandleFunc("GET /api/settings", s.handleGetSettings)
+	admin.HandleFunc("PUT /api/settings", s.handleSaveSettings)
 	admin.HandleFunc("GET /api/market/xmr", s.handleMarket)
 	admin.HandleFunc("GET /api/flight-sheets", s.handleListFlightSheets)
 	admin.HandleFunc("POST /api/flight-sheets", s.handleSaveFlightSheet)
@@ -258,4 +261,47 @@ func (s *Server) handleMarket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.Market.Get(r.Context()))
+}
+
+func (s *Server) handleRigPower(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PowerW float64 `json:"power_w"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.PowerW < 0 || body.PowerW > 100000 {
+		http.Error(w, "power_w out of range", http.StatusBadRequest)
+		return
+	}
+	if err := s.Store.SetRigPower(r.PathValue("id"), body.PowerW); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	set, err := s.Store.Settings()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, set)
+}
+
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var set Settings
+	if !readJSON(w, r, &set) {
+		return
+	}
+	if set.ElectricityPerKWh < 0 || set.ElectricityPerKWh > 10 {
+		http.Error(w, "electricity_eur_kwh out of range", http.StatusBadRequest)
+		return
+	}
+	if err := s.Store.SaveSettings(set); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, set)
 }
