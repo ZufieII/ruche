@@ -17,12 +17,15 @@ import (
 	"ruche/internal/protocol"
 )
 
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 type Config struct {
 	Server   string        // e.g. https://ruche.example.com
 	Token    string        // rig token shown when the rig was created
 	Interval time.Duration // time between reports
+	// WatchXMRig lists API URLs of XMRig instances started by something else
+	// (Hive OS for example), read when Ruche runs no miner itself.
+	WatchXMRig []string
 }
 
 // LoadConfig reads a key=value file such as /etc/ruche/rig.conf.
@@ -49,6 +52,12 @@ func LoadConfig(path string) (Config, error) {
 			cfg.Server = strings.TrimRight(val, "/")
 		case "token":
 			cfg.Token = val
+		case "watch_xmrig":
+			for _, u := range strings.Split(val, ",") {
+				if u = strings.TrimSpace(u); u != "" {
+					cfg.WatchXMRig = append(cfg.WatchXMRig, u)
+				}
+			}
 		case "interval":
 			if d, err := time.ParseDuration(val); err == nil && d >= time.Second {
 				cfg.Interval = d
@@ -135,7 +144,8 @@ func (a *Agent) report(ctx context.Context) protocol.Report {
 		rep.CPU = &cpu
 	}
 	m := a.miner()
-	if m == nil {
+	if m == nil || !m.Running() {
+		a.watchExternal(ctx, &rep)
 		return rep
 	}
 	rep.Miner, rep.Algo, rep.FlightSheetID = a.current.Miner, a.current.Algo, a.current.ID
@@ -232,4 +242,21 @@ func systemUptime() int64 {
 	secs, _, _ := strings.Cut(string(b), ".")
 	n, _ := strconv.ParseInt(strings.TrimSpace(secs), 10, 64)
 	return n
+}
+
+// watchExternal fills the report from a miner Ruche does not control, if one answers.
+func (a *Agent) watchExternal(ctx context.Context, rep *protocol.Report) {
+	for _, url := range a.Cfg.WatchXMRig {
+		st, algo, pool, ok := WatchXMRig(ctx, url)
+		if !ok {
+			continue
+		}
+		rep.External, rep.MinerRunning = true, true
+		rep.Miner, rep.Algo, rep.Pool = protocol.MinerXMRig, algo, pool
+		rep.TotalHashrateHs = st.TotalHs
+		if rep.CPU != nil {
+			rep.CPU.HashrateHs, rep.CPU.MiningThreads, rep.CPU.HugePagesPct = st.TotalHs, st.CPUThreads, st.HugePagesPct
+		}
+		return
+	}
 }

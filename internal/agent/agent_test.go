@@ -2,7 +2,9 @@ package agent_test
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -121,5 +123,52 @@ func TestBadTokenRejected(t *testing.T) {
 	a := &agent.Agent{Cfg: agent.Config{Server: ts.URL, Token: "nope"}, GPUs: agent.FakeGPUs{}}
 	if err := a.Tick(context.Background()); err == nil {
 		t.Fatal("expected unauthorized")
+	}
+}
+
+// A miner started by something else (Hive OS) is watched, not controlled.
+func TestWatchExternalXMRig(t *testing.T) {
+	store, _ := server.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	defer store.Close()
+	ts := httptest.NewServer((&server.Server{Store: store, AdminPassword: "secret123"}).Handler())
+	defer ts.Close()
+	hive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/2/summary" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"algo":"rx/0","connection":{"pool":"pool.supportxmr.com:3333"},
+			"hashrate":{"total":[19800.5,19750,null],"threads":[[1],[1],[1]]},"hugepages":[1168,1168]}`))
+	}))
+	defer hive.Close()
+
+	_, token, _ := store.CreateRig("rig-02")
+	cpuMiner := &agent.FakeMiner{}
+	a := &agent.Agent{
+		Cfg:    agent.Config{Server: ts.URL, Token: token, WatchXMRig: []string{"http://127.0.0.1:1", hive.URL}},
+		CPU:    agent.FakeCPU{},
+		Miners: map[string]agent.Miner{protocol.MinerXMRig: cpuMiner},
+		Client: ts.Client(),
+	}
+	if err := a.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rigs, _ := store.Rigs()
+	rep := rigs[0].Report
+	if !rep.External || !rep.MinerRunning || rep.TotalHashrateHs != 19800.5 || rep.Algo != "rx/0" ||
+		rep.Pool != "pool.supportxmr.com:3333" || rep.CPU.MiningThreads != 3 || rep.CPU.HugePagesPct != 100 {
+		t.Fatalf("external miner not reported: %+v", rep)
+	}
+	if cpuMiner.Running() {
+		t.Fatal("watching must not start a miner")
+	}
+}
+
+func TestConfigWatchXMRig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rig.conf")
+	os.WriteFile(path, []byte("server=http://s:8080\ntoken=abc\nwatch_xmrig=http://127.0.0.1:60050, http://127.0.0.1:60051\n"), 0o600)
+	cfg, err := agent.LoadConfig(path)
+	if err != nil || len(cfg.WatchXMRig) != 2 || cfg.WatchXMRig[1] != "http://127.0.0.1:60051" {
+		t.Fatalf("got %+v %v", cfg, err)
 	}
 }

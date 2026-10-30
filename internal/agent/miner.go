@@ -267,7 +267,11 @@ type xmrigSummary struct {
 		Threads [][]*float64 `json:"threads"`
 	} `json:"hashrate"`
 	// [allocated, total] since XMRig 6; older versions sent a bool.
-	HugePages json.RawMessage `json:"hugepages"`
+	HugePages  json.RawMessage `json:"hugepages"`
+	Algo       string          `json:"algo"`
+	Connection struct {
+		Pool string `json:"pool"`
+	} `json:"connection"`
 }
 
 func firstValue(vals []*float64) float64 {
@@ -345,4 +349,14 @@ func (f *FakeMiner) Stats(context.Context) MinerStats {
 		st.TotalHs += st.PerGPUHs[i]
 	}
 	return st
+}
+
+// WatchXMRig reads an XMRig that something else started, such as Hive OS.
+// URL is its HTTP API root, e.g. http://127.0.0.1:60050.
+func WatchXMRig(ctx context.Context, url string) (MinerStats, string, string, bool) {
+	var body xmrigSummary
+	if err := getJSON(ctx, strings.TrimRight(url, "/")+"/2/summary", &body); err != nil {
+		return MinerStats{}, "", "", false
+	}
+	return body.stats(), body.Algo, body.Connection.Pool, true
 }

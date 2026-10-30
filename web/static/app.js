@@ -154,7 +154,8 @@ async function renderRigs() {
         el("div", { class: "muted" }, ago(rig.last_seen)),
         rig.online && !rig.report.miner_running ? el("div", { class: "muted" }, "mineur arrêté") : ""),
       el("td", {}, hashrate(rig.report.total_hashrate_hs),
-        rig.report.algo ? el("div", { class: "muted" }, `${rig.report.algo} · ${MINERS[rig.report.miner] || rig.report.miner}`) : "",
+        rig.report.algo ? el("div", { class: "muted" }, `${rig.report.algo} · ${MINERS[rig.report.miner] || rig.report.miner}` +
+          (rig.report.external ? " · surveillé" : "")) : "",
         sparkline(histories[i])),
       el("td", { class: hottest >= MAX_TEMP ? "hot" : "" }, hottest ? `${fmt(hottest, 0)} °C` : "—"),
       el("td", { class: "gpus" },
@@ -366,7 +367,15 @@ async function renderDetail() {
       ]),
       el("h3", { style: "margin-top:12px" }, "Wallet"),
       copyField(fs.wallet))
-    : el("p", { class: "muted" }, "Aucune flight sheet : ce rig ne mine pas.");
+    : rep.external
+      ? el("div", {},
+        el("p", { class: "muted", style: "margin:0 0 8px" }, "Surveillance seule : ce mineur a été lancé par un autre outil (Hive OS par exemple). Ruche lit ses chiffres sans le piloter."),
+        kv([
+          ["Mineur", MINERS[rep.miner] || rep.miner],
+          ["Algorithme", rep.algo || "—"],
+          ["Pool", rep.pool || "—"],
+        ]))
+      : el("p", { class: "muted" }, "Aucune flight sheet : ce rig ne mine pas.");
 
   const hardware = [];
   if (cpu) {

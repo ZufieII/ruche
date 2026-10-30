@@ -3,7 +3,7 @@
 Alternative libre et auto-hébergeable à Hive OS pour piloter des rigs de minage.
 (« Ruche » est un nom de travail : « Hive OS » est une marque de Hiveon.)
 
-## Ce que fait la version 0.3
+## Ce que fait la version 0.4
 
 - **Tableau de bord web** : rigs en ligne ou hors ligne, hashrate total et par GPU, températures, ventilateurs, consommation, courbe du hashrate sur 6 h.
 - **Fiche détaillée d'un rig** (clic sur son nom) : wallet, pool, worker, graphique 24 h, matériel, IP, durée de fonctionnement, journal du mineur.
@@ -14,6 +14,7 @@ Alternative libre et auto-hébergeable à Hive OS pour piloter des rigs de minag
 - **Commandes à distance** : relancer ou arrêter le mineur, redémarrer le rig.
 - **Alertes** (Telegram ou logs) : rig hors ligne, retour en ligne, GPU trop chaud.
 - **Agent du rig** (Linux et Windows) : lit le processeur et les GPU, lance le bon mineur, le relance s'il plante.
+- **Surveillance seule** : avec `watch_xmrig=http://127.0.0.1:PORT` dans `rig.conf`, l'agent lit un XMRig lancé par un autre outil (Hive OS par exemple) quand Ruche ne mine pas lui-même.
 - L'agent se connecte **vers** le serveur : aucun port à ouvrir sur le rig.
 - Le serveur ne garde qu'une empreinte des tokens des rigs.
 

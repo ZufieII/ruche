@@ -39,6 +39,10 @@ type Report struct {
 	CPU             *CPUStat  `json:"cpu,omitempty"`
 	GPUs            []GPUStat `json:"gpus"`
 	MinerLog        []string  `json:"miner_log,omitempty"` // last lines of the miner's output
+	// External is true when the agent only watches a miner it did not start
+	// (for example one run by Hive OS). Pool is then what that miner reports.
+	External bool   `json:"external,omitempty"`
+	Pool     string `json:"pool,omitempty"`
 }
 
 // FlightSheet says what a rig should mine, where and for whom.
